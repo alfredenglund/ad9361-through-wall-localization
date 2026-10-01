@@ -1,3 +1,6 @@
+import time
+from collections import deque
+
 import numpy as np
 import adi
 import matplotlib.pyplot as plt
@@ -37,10 +40,20 @@ mixer = np.exp(-2j * np.pi * BIN * n / N)
 #Warm up
 for _ in range(4): sdr.rx()
 
+# Live plot: interactive mode so the window updates without blocking the loop
+plt.ion()
+fig, ax = plt.subplots()
+line, = ax.plot([], [])
+ax.set_yscale("log")          # still ~0.002, moving ~0.2: log keeps both visible
+ax.set_xlabel("time (s)")
+ax.set_ylabel("phase spread (rad)")
+WINDOW = 30                   # seconds of history shown
+times = deque(maxlen=200)     # more than fits in WINDOW; old values drop off automatically
+values = deque(maxlen=200)
+start = time.time()
+
 try:
     while True:
-        #Transmit
-
         #Receive
         buffer = sdr.rx()
         chunks = buffer.reshape(1024, 1024)
@@ -57,7 +70,20 @@ try:
         phase_spread = phase.std() # The spread of the phase
 
         print(f"Phase: {phase_spread:.4f} | Amplitude: {(amplitude):.1f}")
-        
+
+        # Update the live plot: new data on the same line, rescale, redraw
+        now = time.time() - start
+        times.append(now)
+        values.append(phase_spread)
+        line.set_data(times, values)
+        ax.relim()
+        ax.autoscale_view()
+        ax.set_xlim(max(0, now - WINDOW), max(WINDOW, now))   # scroll: always show the last 30 s
+        plt.pause(0.01)
+
+        # Closing the window stops the program
+        if not plt.fignum_exists(fig.number):
+            break
 
 except KeyboardInterrupt:
     print("Stopped by user")
