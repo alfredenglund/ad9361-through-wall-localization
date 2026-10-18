@@ -1,0 +1,158 @@
+<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibration</title>
+<style>
+:root { --bg:#fff; --fg:#111; --muted:#666; --line:#e5e5e5; --accent:#2563eb; --rec:#dc2626; --ok:#16a34a; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111; --fg:#eee; --muted:#999; --line:#2a2a2a; --accent:#60a5fa; --rec:#f87171; --ok:#4ade80; }
+}
+body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:16px -apple-system, system-ui, sans-serif; }
+#stepno { color:var(--muted); font-size:14px; }
+#text { font-size:26px; font-weight:600; line-height:1.25; margin:8px 0 20px; }
+#stage { font-size:18px; color:var(--muted); }
+#count { font-size:96px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; margin:4px 0 12px; }
+.rec #stage, .rec #count { color:var(--rec); }
+.bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; }
+.bar div { height:100%; width:0; background:var(--accent); }
+.rec .bar div { background:var(--rec); }
+button { width:100%; padding:22px; font-size:20px; font-weight:600; border:0; border-radius:12px;
+         background:var(--accent); color:#fff; margin-top:8px; }
+#live { color:var(--muted); font-size:13px; margin-top:24px; font-variant-numeric:tabular-nums; }
+table { border-collapse:collapse; width:100%; font-size:14px; font-variant-numeric:tabular-nums; margin-top:12px; }
+th, td { text-align:right; padding:6px 4px; border-bottom:1px solid var(--line); }
+th:first-child, td:first-child { text-align:left; }
+.sug { margin-top:16px; line-height:1.5; }
+.good { color:var(--ok); } .bad { color:var(--rec); }
+</style>
+</head><body>
+<div id="stepno">connecting...</div>
+<div id="text"></div>
+<div id="main"></div>
+<div id="live"></div>
+
+<script>
+let server = null;        // last state from calibrate.py
+let local = null;         // { step, stage, deadline } - keeps counting if WiFi drops behind the door
+let lastCue = "";
+let audio = null;
+
+function beep(times) {
+  if (navigator.vibrate) navigator.vibrate(Array(times).fill([250, 150]).flat());
+  if (!audio) return;
+  for (let i = 0; i < times; i++) {
+    const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + i * 0.35;
+    o.frequency.value = 880; o.connect(g); g.connect(audio.destination);
+    g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    o.start(t); o.stop(t + 0.25);
+  }
+}
+
+// One beep when recording starts, three when a step is finished
+function cue(step, stage) {
+  const key = step + ":" + stage;
+  if (key === lastCue) return;
+  if (lastCue && stage === "record") beep(1);
+  if (lastCue && (stage === "ready" || stage === "done") && lastCue.endsWith("record")) beep(3);
+  lastCue = key;
+}
+
+async function go() {
+  if (!audio) { audio = new (window.AudioContext || window.webkitAudioContext)(); }  // needs a tap to unlock
+  audio.resume();
+  local = { step: server.step, stage: "settle", deadline: Date.now() + server.settle * 1000 };
+  lastCue = server.step + ":settle";
+  render();
+  try { await fetch("/go", { cache: "no-store" }); } catch (e) {}
+}
+
+async function skipSettle() {
+  local = { step: server.step, stage: "record", deadline: Date.now() + server.record * 1000 };
+  render();
+  try { await fetch("/skip", { cache: "no-store" }); } catch (e) {}
+}
+
+function fmt(x, d) { return Number.isFinite(x) ? x.toFixed(d) : "-"; }
+
+function render() {
+  if (!server) return;
+  // Advance the local timer on its own; it is replaced by the server's state whenever that arrives
+  if (local && local.stage === "settle" && Date.now() >= local.deadline) {
+    local = { step: local.step, stage: "record", deadline: local.deadline + server.record * 1000 };
+  }
+  if (local && local.stage === "record" && Date.now() >= local.deadline) {
+    local = { step: local.step, stage: "ready", deadline: 0 };
+  }
+  const stage = local ? local.stage : server.stage;
+  cue(local ? local.step : server.step, stage);
+
+  document.getElementById("stepno").textContent =
+    stage === "done" ? "Calibration finished" : `Step ${server.step} of ${server.n_steps}`;
+  document.body.className = stage === "record" ? "rec" : "";
+  const main = document.getElementById("main");
+
+  if (stage === "done") {
+    document.getElementById("text").textContent = "Results";
+    const rows = server.summary.map(s => `<tr><td>${s.key}</td><td>${fmt(s.old_phase_x_empty, 1)}x</td>
+      <td>${fmt(s.spread3_x_empty, 1)}x</td><td>${fmt(s.direct3_x_empty, 1)}x</td><td>${fmt(s.breath_ratio, 0)}</td></tr>`).join("");
+    const g = server.suggest, yes = ok => ok ? '<span class="good">separable</span>' : '<span class="bad">overlapping</span>';
+    const other = g.other_room_spread3_separable === undefined ? "" :
+      `Other room vs empty: old phase ${yes(g.other_room_old_phase_separable)}, 3 s spread ${yes(g.other_room_spread3_separable)},
+       direct 3 s ${yes(g.other_room_direct3_separable)}<br>`;
+    main.innerHTML = `<table><tr><th>step</th><th>old</th><th>3 s</th><th>direct 3 s</th><th>breath</th></tr>${rows}</table>
+      <div style="color:var(--muted);font-size:13px">old phase, 3 s spread and direct 3 s as multiples of the empty room</div>
+      <div class="sug">${other}
+      Movement threshold: <b>${fmt(g.movement_threshold, 4)}</b> (${fmt(g.movement_x_empty, 1)}x empty), ${yes(g.movement_separable)}<br>
+      Breathing threshold (3 s spread): <b>${fmt(g.breath_spread_threshold, 4)}</b> (${fmt(g.breath_spread_x_empty, 1)}x empty), ${yes(g.breath_separable)}<br>
+      Breath ratio: empty up to ${fmt(g.breath_ratio_empty_max, 1)}, standing still at least ${fmt(g.breath_ratio_still_min, 1)}<br>
+      <span style="color:var(--muted)">Saved: ${server.file}</span></div>`;
+    return;
+  }
+
+  document.getElementById("text").textContent = server.text;
+  if (stage === "ready" && server.stage !== "ready") {
+    main.dataset.view = "";
+    main.innerHTML = `<div id="stage">Step finished. Come back into WiFi range for the next step.</div>`;
+  } else if (stage === "ready") {
+    if (main.dataset.view !== server.step + ":ready") {
+      main.dataset.view = server.step + ":ready";
+      main.innerHTML = `<button onclick="go()">Start step: ${server.settle} s to get in position</button>`;
+    }
+  } else {
+    const left = Math.max(0, Math.ceil((local ? local.deadline - Date.now() : server.remaining * 1000) / 1000));
+    const total = stage === "settle" ? server.settle : server.record;
+    // Rebuild only when the stage changes, so the button isn't replaced mid-tap
+    if (main.dataset.view !== server.step + ":" + stage) {
+      main.dataset.view = server.step + ":" + stage;
+      main.innerHTML = `<div id="stage">${stage === "settle" ? "Get into position" : "Recording, stay as instructed"}</div>
+        <div id="count"></div><div class="bar"><div id="fill"></div></div>
+        ${stage === "settle" ? `<button onclick="skipSettle()">I'm already in position</button>` : ""}`;
+    }
+    document.getElementById("count").textContent = left;
+    document.getElementById("fill").style.width = `${100 * (1 - left / total)}%`;
+  }
+}
+
+async function poll() {
+  try {
+    const d = await (await fetch("/data", { cache: "no-store" })).json();
+    // Trust the server again once it has caught up with (or moved past) what we were counting locally
+    if (!local || d.step !== local.step || d.stage === local.stage || d.stage === "done"
+        || (local.stage === "settle" && d.stage === "record")) {
+      local = (d.stage === "settle" || d.stage === "record")
+        ? { step: d.step, stage: d.stage, deadline: Date.now() + d.remaining * 1000 } : null;
+    }
+    server = d;
+    document.getElementById("live").textContent =
+      `live presence ${fmt(d.presence, 4)} | signal ch0 ${fmt(d.amp0, 1)}, ch1 ${fmt(d.amp1, 1)}`;
+  } catch (e) {
+    document.getElementById("live").textContent = "no connection to calibrate.py (still counting on the phone)";
+  }
+  render();
+}
+setInterval(poll, 1000);
+setInterval(render, 250);
+poll();
+</script>
+</body></html>

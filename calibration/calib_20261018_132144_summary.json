@@ -1,0 +1,54 @@
+{
+  "steps": [
+    {
+      "key": "empty",
+      "presence_med": 0.03484331711738637,
+      "presence_p90": 0.04116332335073799,
+      "spread3_med": 0.0008646673490690357,
+      "breath_ratio": 2.4647338159997783,
+      "breath_bpm": 10.12777330171103
+    },
+    {
+      "key": "still_5m",
+      "presence_med": 0.03908119618182406,
+      "presence_p90": 0.05139271178860422,
+      "spread3_med": 0.0040880242949934255,
+      "breath_ratio": 39.82270519670506,
+      "breath_bpm": 8.102513742702426
+    },
+    {
+      "key": "walking",
+      "presence_med": 0.03800697393721159,
+      "presence_p90": 0.07134822197804568,
+      "spread3_med": 0.022641472967354793,
+      "breath_ratio": 17.5059469366989,
+      "breath_bpm": 10.218149060344361
+    },
+    {
+      "key": "still_2m",
+      "presence_med": 0.032864560988042225,
+      "presence_p90": 0.0445116747755638,
+      "spread3_med": 0.00936350081019844,
+      "breath_ratio": 187.28578365147072,
+      "breath_bpm": 6.076273434989493
+    },
+    {
+      "key": "empty2",
+      "presence_med": 0.030994226083953025,
+      "presence_p90": 0.04049405120509776,
+      "spread3_med": 0.0006734230156915142,
+      "breath_ratio": 8.74513453398075,
+      "breath_bpm": 9.11459028080023
+    }
+  ],
+  "suggest": {
+    "movement_threshold": 0.039553676918341135,
+    "movement_x_empty": 1.201553854990642,
+    "movement_separable": false,
+    "breath_spread_threshold": 0.001880101361650956,
+    "breath_spread_x_empty": 2.1743637754741303,
+    "breath_separable": true,
+    "breath_ratio_empty_max": 8.74513453398075,
+    "breath_ratio_still_min": 39.82270519670506
+  }
+}
